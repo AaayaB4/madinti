@@ -1,5 +1,8 @@
 # 🏙️ Madinti - Civic Reporting Platform
 
+[![GitHub](https://img.shields.io/badge/GitHub-AaayaB4%2Fmadinti-blue?logo=github)](https://github.com/AaayaB4/madinti)
+
+
 A secure, AI-powered civic engagement platform for Sidi Slimane, Morocco.
 
 ## 🚀 Quick Start

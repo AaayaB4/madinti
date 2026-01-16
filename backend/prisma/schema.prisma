@@ -1,0 +1,147 @@
+// Prisma schema for Madinti - Civic Reporting Platform
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// User model - Both citizens and government users
+model User {
+  id            String   @id @default(uuid())
+  phoneNumber   String   @unique @map("phone_number")
+  phoneHash     String   @unique @map("phone_hash") // Hashed for privacy
+  fullName      String?  @map("full_name")
+  role          Role     @default(CITIZEN)
+  isActive      Boolean  @default(true) @map("is_active")
+  points        Int      @default(0) // Gamification
+  createdAt     DateTime @default(now()) @map("created_at")
+  lastLogin     DateTime? @map("last_login")
+  
+  // Relations
+  reports       Report[]
+  reportUpdates ReportUpdate[]
+  upvotes       ReportUpvote[]
+  
+  @@map("users")
+}
+
+enum Role {
+  CITIZEN
+  FIELD_WORKER
+  ADMIN
+  SUPER_ADMIN
+}
+
+// Report model - Main civic issues
+model Report {
+  id                  String       @id @default(uuid())
+  userId              String       @map("user_id")
+  category            Category
+  subcategory         String?
+  description         String?
+  locationLat         Float        @map("location_lat")
+  locationLng         Float        @map("location_lng")
+  address             String?
+  communeId           String?      @map("commune_id")
+  provinceId          String?      @map("province_id")
+  regionId            String?      @map("region_id")
+  status              ReportStatus @default(NEW)
+  priority            Int          @default(2) // 1=low, 2=medium, 3=high, 4=urgent
+  aiConfidence        Float?       @map("ai_confidence")
+  aiSuggestedCategory String?      @map("ai_suggested_category")
+  photoUrls           String[]     @map("photo_urls")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  resolvedAt          DateTime?    @map("resolved_at")
+  assignedToId        String?      @map("assigned_to_id")
+  department          String?
+  upvoteCount         Int          @default(0) @map("upvote_count")
+  isDuplicate         Boolean      @default(false) @map("is_duplicate")
+  duplicateOfId       String?      @map("duplicate_of_id")
+  
+  // Relations
+  user                User         @relation(fields: [userId], references: [id])
+  duplicateOf         Report?      @relation("Duplicates", fields: [duplicateOfId], references: [id])
+  duplicates          Report[]     @relation("Duplicates")
+  updates             ReportUpdate[]
+  upvotes             ReportUpvote[]
+  
+  @@index([status])
+  @@index([createdAt])
+  @@index([locationLat, locationLng])
+  @@map("reports")
+}
+
+enum Category {
+  ROAD
+  LIGHTING
+  WASTE
+  WATER
+  SANITATION
+  PUBLIC_SPACE
+  SIGNAGE
+  OTHER
+}
+
+enum ReportStatus {
+  NEW
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+  REJECTED
+  DUPLICATE
+}
+
+// Report updates/audit log
+model ReportUpdate {
+  id          String       @id @default(uuid())
+  reportId    String       @map("report_id")
+  updatedById String       @map("updated_by_id")
+  oldStatus   ReportStatus? @map("old_status")
+  newStatus   ReportStatus? @map("new_status")
+  comment     String?
+  photoUrls   String[]     @map("photo_urls")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  
+  // Relations
+  report      Report       @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  updatedBy   User         @relation(fields: [updatedById], references: [id])
+  
+  @@map("report_updates")
+}
+
+// Report upvotes - prevent duplicates, show priority
+model ReportUpvote {
+  reportId  String   @map("report_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@id([reportId, userId])
+  @@map("report_upvotes")
+}
+
+// SMS reports (for alternative access)
+model SmsReport {
+  id               String   @id @default(uuid())
+  phoneNumber      String   @map("phone_number")
+  smsBody          String   @map("sms_body")
+  parsedCategory   String?  @map("parsed_category")
+  parsedDescription String? @map("parsed_description")
+  parsedLocation   String?  @map("parsed_location")
+  reportId         String?  @map("report_id")
+  status           String   @default("pending") // pending, processed, failed
+  createdAt        DateTime @default(now()) @map("created_at")
+  
+  @@map("sms_reports")
+}
