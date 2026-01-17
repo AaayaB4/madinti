@@ -11,6 +11,7 @@ dotenv.config();
 import healthRouter from './routes/health';
 import authRouter from './routes/auth';
 import reportsRouter from './routes/reports';
+import statsRouter from './routes/stats';
 
 const app: Application = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +38,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api/stats', statsRouter);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

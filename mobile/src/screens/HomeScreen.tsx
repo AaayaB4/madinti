@@ -1,0 +1,598 @@
+import React, { useState, useEffect } from 'react';
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    TouchableOpacity,
+    ActivityIndicator,
+    RefreshControl,
+    Platform,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import { useNavigation } from '@react-navigation/native';
+import { apiService, Report } from '../services/api';
+import { COLORS, CATEGORIES } from '../config/constants';
+import { useLanguage } from '../utils/LanguageContext';
+
+type TabType = 'all' | 'pending' | 'resolved' | 'mine';
+
+export default function HomeScreen() {
+    const navigation = useNavigation();
+    const { language, setLanguage, t } = useLanguage();
+    const [reports, setReports] = useState<Report[]>([]);
+    const [filteredReports, setFilteredReports] = useState<Report[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState('');
+    const [activeTab, setActiveTab] = useState<TabType>('all');
+
+    useEffect(() => {
+        loadReports();
+
+        const unsubscribe = (navigation as any).addListener('focus', () => {
+            loadReports();
+        });
+
+        return unsubscribe;
+    }, [navigation]);
+
+    useEffect(() => {
+        filterReports();
+    }, [activeTab, reports]);
+
+    const loadReports = async () => {
+        try {
+            setLoading(true);
+            const data = await apiService.getReports();
+            setReports(data);
+            setError('');
+        } catch (err: any) {
+            setError(t('failedToLoad'));
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const filterReports = () => {
+        let filtered = [...reports];
+
+        switch (activeTab) {
+            case 'pending':
+                filtered = reports.filter(r => r.status === 'NEW' || r.status === 'ACKNOWLEDGED' || r.status === 'IN_PROGRESS');
+                break;
+            case 'resolved':
+                filtered = reports.filter(r => r.status === 'RESOLVED' || r.status === 'CLOSED');
+                break;
+            case 'mine':
+                filtered = reports.filter(r => r.userId === 'current-user-id');
+                break;
+            case 'all':
+            default:
+                filtered = reports;
+                break;
+        }
+
+        filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setFilteredReports(filtered);
+    };
+
+    const onRefresh = async () => {
+        setRefreshing(true);
+        await loadReports();
+        setRefreshing(false);
+    };
+
+    const toggleLanguage = () => {
+        setLanguage(language === 'ar' ? 'fr' : 'ar');
+    };
+
+    const getTabLabel = (tab: TabType) => {
+        const labels = {
+            ar: { all: 'الكل', pending: 'قيد المعالجة', resolved: 'محلولة', mine: 'بلاغاتي' },
+            fr: { all: 'Tous', pending: 'En cours', resolved: 'Résolus', mine: 'Mes signalements' }
+        };
+        return labels[language][tab];
+    };
+
+    const renderReport = ({ item }: { item: Report }) => (
+        <TouchableOpacity
+            style={styles.reportItem}
+            activeOpacity={0.9}
+            onPress={() => (navigation as any).navigate('ReportDetail', { reportId: item.id })}
+        >
+            <BlurView
+                intensity={60}
+                tint="light"
+                style={styles.reportCard}
+            >
+                <View style={styles.reportContent}>
+                    <View style={styles.reportHeader}>
+                        <View style={styles.categoryRow}>
+                            <Text style={styles.categoryIcon}>{getCategoryIcon(item.category)}</Text>
+                            <Text style={styles.reportCategory}>{getCategoryLabel(item.category)}</Text>
+                        </View>
+                        <View style={[styles.statusBadge, getStatusColor(item.status)]}>
+                            <Text style={styles.statusText}>{getStatusLabel(item.status)}</Text>
+                        </View>
+                    </View>
+
+                    {item.description && (
+                        <Text style={styles.reportDescription} numberOfLines={2}>
+                            {item.description}
+                        </Text>
+                    )}
+
+                    <View style={styles.reportFooter}>
+                        <Text style={styles.date}>
+                            {formatDate(item.createdAt)}
+                        </Text>
+                        <View style={styles.upvoteContainer}>
+                            <Text style={styles.upvoteIcon}>👍</Text>
+                            <Text style={styles.upvoteCount}>{item.upvoteCount || 0}</Text>
+                        </View>
+                    </View>
+                </View>
+            </BlurView>
+        </TouchableOpacity>
+    );
+
+    const getCategoryIcon = (category: string) => {
+        const icons: { [key: string]: string } = {
+            ROAD: '🛣️', LIGHTING: '💡', WASTE: '🗑️', WATER: '💧',
+            SANITATION: '🚰', PUBLIC_SPACE: '🏞️', SIGNAGE: '🚦', OTHER: '📍',
+        };
+        return icons[category] || '📍';
+    };
+    const getStatusLabel = (status: string) => {
+        const labels = {
+            ar: {
+                NEW: 'جديد', ACKNOWLEDGED: 'تم الاستلام', IN_PROGRESS: 'قيد المعالجة',
+                RESOLVED: 'محلول', CLOSED: 'مُغلق', REJECTED: 'مرفوض',
+            },
+            fr: {
+                NEW: 'Nouveau', ACKNOWLEDGED: 'Reçu', IN_PROGRESS: 'En cours',
+                RESOLVED: 'Résolu', CLOSED: 'Fermé', REJECTED: 'Rejeté',
+            }
+        };
+        return labels[language][status as keyof typeof labels.ar] || status;
+    };
+
+    const getCategoryLabel = (category: string) => {
+        const cat = CATEGORIES.find(c => c.value === category);
+        if (!cat) return category;
+        return language === 'ar' ? cat.labelAr : cat.labelFr;
+    };
+
+    const getStatusColor = (status: string) => {
+        switch (status) {
+            case 'NEW': return { backgroundColor: COLORS.info + '20' };
+            case 'ACKNOWLEDGED':
+            case 'IN_PROGRESS': return { backgroundColor: COLORS.warning + '20' };
+            case 'RESOLVED':
+            case 'CLOSED': return { backgroundColor: COLORS.success + '20' };
+            case 'REJECTED': return { backgroundColor: COLORS.danger + '25' };
+            default: return { backgroundColor: COLORS.glass.dark };
+        }
+    };
+
+    const formatDate = (dateString: string) => {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        if (diffMins < 1) return language === 'ar' ? 'الآن' : 'Maintenant';
+        if (diffMins < 60) return `${diffMins}${language === 'ar' ? ' د' : 'min'}`;
+        if (diffHours < 24) return `${diffHours}${language === 'ar' ? ' س' : 'h'}`;
+        if (diffDays < 7) return `${diffDays}${language === 'ar' ? ' ي' : 'j'}`;
+
+        return date.toLocaleDateString(language === 'ar' ? 'ar-MA' : 'fr-FR', {
+            day: 'numeric', month: 'short'
+        });
+    };
+
+    if (loading && !refreshing) {
+        return (
+            <LinearGradient colors={['#FFFFFF', '#F9FAFB'] as any} style={styles.centerContainer}>
+                <BlurView intensity={60} tint="light" style={styles.loadingBlur}>
+                    <ActivityIndicator size="large" color={COLORS.primary} />
+                    <Text style={styles.loadingText}>{t('loading')}</Text>
+                </BlurView>
+            </LinearGradient>
+        );
+    }
+
+    return (
+        <View style={styles.container}>
+            {/* Gradient Background */}
+            <LinearGradient
+                colors={['#F9FAFB', '#F3F4F6', '#E5E7EB'] as any}
+                style={StyleSheet.absoluteFill}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+            />
+
+            {/* Header with Glass Effect */}
+            <BlurView intensity={80} tint="light" style={styles.header}>
+                <View style={styles.headerContent}>
+                    <View>
+                        <Text style={styles.title}>{t('appName')}</Text>
+                        <Text style={styles.subtitle}>{t('appSubtitle')}</Text>
+                    </View>
+
+                    <View style={styles.headerButtons}>
+                        <TouchableOpacity
+                            style={styles.languageButton}
+                            onPress={toggleLanguage}
+                            activeOpacity={0.8}
+                        >
+                            <BlurView intensity={60} tint="light" style={styles.languageButtonBlur}>
+                                <Text style={styles.languageButtonText}>
+                                    {language === 'ar' ? 'FR' : 'ع'}
+                                </Text>
+                            </BlurView>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </BlurView>
+
+            {/* Tabs with Glass */}
+            <BlurView intensity={80} tint="light" style={styles.tabContainer}>
+                {(['all', 'pending', 'resolved', 'mine'] as TabType[]).map((tab) => (
+                    <TouchableOpacity
+                        key={tab}
+                        style={styles.tab}
+                        onPress={() => setActiveTab(tab)}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={[
+                            styles.tabText,
+                            activeTab === tab && styles.tabTextActive
+                        ]}>
+                            {getTabLabel(tab)}
+                        </Text>
+                        {activeTab === tab && (
+                            <View style={styles.tabIndicator} />
+                        )}
+                    </TouchableOpacity>
+                ))}
+            </BlurView>
+
+            {/* Report List */}
+            <FlatList
+                data={filteredReports}
+                renderItem={renderReport}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.reportList}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor={COLORS.white}
+                    />
+                }
+                ListEmptyComponent={
+                    !error ? (
+                        <View style={styles.emptyContainer}>
+                            <Text style={styles.emptyIcon}>📭</Text>
+                            <Text style={styles.emptyText}>
+                                {activeTab === 'mine'
+                                    ? (language === 'ar' ? 'لا توجد بلاغات لك' : 'Aucun de vos signalements')
+                                    : t('noReports')
+                                }
+                            </Text>
+                        </View>
+                    ) : null
+                }
+            />
+
+            {/* Glass FAB */}
+            <TouchableOpacity
+                style={styles.fabWrapper}
+                onPress={() => (navigation as any).navigate('Report')}
+                activeOpacity={0.9}
+            >
+                <LinearGradient
+                    colors={COLORS.gradients.gradient as any}
+                    style={styles.fab}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                >
+                    <Text style={styles.fabIcon}>+</Text>
+                </LinearGradient>
+            </TouchableOpacity>
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+    },
+    centerContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    loadingBlur: {
+        padding: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: COLORS.glass.border,
+        overflow: 'hidden',
+    },
+    loadingText: {
+        marginTop: 16,
+        color: COLORS.text.primary,
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    header: {
+        paddingTop: Platform.OS === 'ios' ? 60 : 40,
+        paddingBottom: 20,
+        paddingHorizontal: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.glass.border,
+        overflow: 'hidden',
+    },
+    headerContent: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    headerButtons: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    mapButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: COLORS.backgroundCard,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: COLORS.glass.border,
+    },
+    mapButtonText: {
+        fontSize: 20,
+    },
+    title: {
+        fontSize: 28,
+        fontWeight: '800',
+        color: '#1F2937', // Gray-800 for AAA contrast
+        letterSpacing: -0.5,
+    },
+    subtitle: {
+        fontSize: 14,
+        color: '#6B7280', // Gray-500 for AA contrast  
+        marginTop: 2,
+    },
+    reportDate: {
+        fontSize: 12,
+        color: '#6B7280', // Gray-500
+        marginTop: 2,
+        opacity: 0.9,
+    },
+    errorText: {
+        fontSize: 18,
+        color: '#1F2937', // Gray-800
+        marginTop: 2,
+        opacity: 0.9,
+    },
+    greeting: {
+        fontSize: 16,
+        color: '#374151', // Gray-700
+        fontWeight: '400',
+    },
+    name: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: COLORS.primary,
+        marginTop: 2,
+    },
+    languageButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: COLORS.glass.border,
+    },
+    languageButtonBlur: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    languageButtonText: {
+        color: '#374151', // Gray-700
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    backButtonText: {
+        color: '#1F2937', // Gray-800
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    tabContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 8,
+        borderBottomWidth: 2,
+        borderBottomColor: COLORS.gray[200],
+        overflow: 'hidden',
+        backgroundColor: COLORS.white,
+    },
+    tab: {
+        flex: 1,
+        paddingVertical: 12,
+        alignItems: 'center',
+        position: 'relative',
+    },
+    tabText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#9CA3AF', // Gray-400 for inactive
+    },
+    tabTextActive: {
+        color: COLORS.primary,
+        fontWeight: '700',
+    },
+    tabIndicator: {
+        position: 'absolute',
+        bottom: -8,
+        left: '25%',
+        right: '25%',
+        height: 3,
+        backgroundColor: COLORS.primary,
+        borderRadius: 2,
+    },
+    reportList: {
+        padding: 16,
+    },
+    reportItem: {
+        marginBottom: 16,
+        borderRadius: 16,
+        overflow: 'hidden',
+        backgroundColor: COLORS.white,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 12,
+            },
+            android: {
+                elevation: 4,
+            },
+        }),
+    },
+    reportCard: {
+        borderRadius: 16,
+        overflow: 'hidden',
+    },
+    reportContent: {
+        padding: 16,
+    },
+    reportHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    categoryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    categoryIcon: {
+        fontSize: 20,
+        marginRight: 8,
+    },
+    reportCategory: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#1F2937', // Gray-800 for strong contrast
+    },
+    statusBadge: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+    },
+    statusText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#374151', // Gray-700
+        textTransform: 'uppercase',
+    },
+    reportDescription: {
+        fontSize: 14,
+        color: '#4B5563', // Gray-600 for body text
+        lineHeight: 22,
+        marginBottom: 12,
+    },
+    reportFooter: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    date: {
+        fontSize: 13,
+        color: '#6B7280', // Gray-500 for timestamps
+    },
+    upvoteContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.glass.light,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: COLORS.glass.border,
+    },
+    upvoteIcon: {
+        fontSize: 14,
+        marginRight: 4,
+    },
+    upvoteCount: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1F2937', // Gray-800
+    },
+    emptyContainer: {
+        alignItems: 'center',
+        marginTop: 100,
+    },
+    emptyIcon: {
+        fontSize: 64,
+        marginBottom: 16,
+    },
+    upvoteText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#374151', // Gray-700
+        textAlign: 'center',
+    },
+    emptyText: {
+        fontSize: 16,
+        color: '#6B7280', // Gray-500
+        textAlign: 'center',
+        marginTop: 24,
+    },
+    fabWrapper: {
+        position: 'absolute',
+        right: 20,
+        bottom: 20,
+        borderRadius: 28,
+        fontSize: 16,
+        color: COLORS.text.secondary,
+        textAlign: 'center',
+        marginTop: 24,
+    },
+    fab: {
+        position: 'absolute',
+        bottom: 24,
+        right: 24,
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: COLORS.primary,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    fabIcon: {
+        fontSize: 28,
+        color: COLORS.white,
+        fontWeight: '300',
+    },
+});
